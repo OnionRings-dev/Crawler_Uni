@@ -18,9 +18,10 @@ from urllib.parse import urljoin, urlparse
 from groq import Groq
 import tiktoken
 
-class UniMiIntegratedBot:
+class EnhancedUniMiBot:
     def __init__(self, groq_api_key=None, model_name="openai/gpt-oss-20b", embedding_model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"):
-        self.groq_api_key = groq_api_key or os.getenv('GROQ_API_KEY', 'API')
+        # Use the API key from the original file
+        self.groq_api_key = groq_api_key or 'API'
         self.model_name = model_name
         self.groq_client = None
         self.embedding_model_name = embedding_model_name
@@ -33,6 +34,7 @@ class UniMiIntegratedBot:
         self.timeout = 15
         self.max_content_length = 8000
         self.current_query = ""
+        self.cleaned_query = ""
         self.search_results = []
         self.scraped_pages = []
         
@@ -81,6 +83,107 @@ class UniMiIntegratedBot:
         except:
             self.tokenizer = tiktoken.get_encoding("cl100k_base")
     
+    def clean_user_query(self, user_query):
+        """Clean and optimize user query using AI for better semantic search"""
+        try:
+            print(f"🧹 Cleaning query: '{user_query}'")
+            
+            cleaning_prompt = f"""Sei un esperto di ottimizzazione delle query per ricerca semantica universitaria.
+            
+L'utente ha fatto questa domanda: "{user_query}"
+
+Il tuo compito è estrarre SOLO le parole chiave essenziali per una ricerca semantica efficace su un database universitario (Università Statale di Milano).
+
+REGOLE:
+1. Rimuovi parole di cortesia ("potresti", "riusciresti", "per favore", ecc.)
+2. Rimuovi articoli, preposizioni e congiunzioni non essenziali
+3. Mantieni solo i concetti chiave e i termini tecnici
+4. Converti forme verbali in sostantivi quando possibile
+5. Mantieni i termini specifici dell'università (corsi, servizi, procedure)
+6. Massimo 8-10 parole chiave
+
+ESEMPI:
+- "riusciresti a trovare le pagine per andare all'estero con l'università" → "andare estero università programmi internazionali"
+- "come faccio a iscrivermi al corso di laurea in informatica" → "iscrizione corso laurea informatica"
+- "dove posso trovare informazioni sui tirocini curriculari" → "tirocini curriculari informazioni"
+- "quali sono i requisiti per la borsa di studio" → "requisiti borsa studio"
+
+Rispondi SOLO con le parole chiave ottimizzate, separate da spazi. Niente altro."""
+
+            response = self.groq_client.chat.completions.create(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Sei un esperto di ottimizzazione query per ricerca semantica universitaria. Estrai solo le parole chiave essenziali."
+                    },
+                    {
+                        "role": "user", 
+                        "content": cleaning_prompt
+                    }
+                ],
+                model=self.model_name,
+                max_tokens=100,
+                temperature=0.1,
+                top_p=1,
+                stream=False
+            )
+            
+            cleaned_query = response.choices[0].message.content.strip()
+            
+            # Basic validation and fallback
+            if not cleaned_query or len(cleaned_query.split()) < 2:
+                print("⚠️ AI cleaning failed, using basic text processing")
+                # Fallback to basic text processing
+                cleaned_query = self.basic_query_cleaning(user_query)
+            
+            print(f"✨ Cleaned query: '{cleaned_query}'")
+            self.cleaned_query = cleaned_query
+            return cleaned_query
+            
+        except Exception as e:
+            print(f"⚠️ Error in AI query cleaning: {e}")
+            print("🔄 Falling back to basic text processing")
+            cleaned_query = self.basic_query_cleaning(user_query)
+            self.cleaned_query = cleaned_query
+            return cleaned_query
+    
+    def basic_query_cleaning(self, user_query):
+        """Fallback basic text processing for query cleaning"""
+        # Remove common courtesy words and phrases
+        courtesy_words = [
+            'potresti', 'riusciresti', 'puoi', 'riesci', 'per favore', 'grazie',
+            'vorrei', 'volevo', 'mi servirebbe', 'mi serve', 'ho bisogno',
+            'come faccio', 'dove posso', 'è possibile', 'si può'
+        ]
+        
+        # Remove articles, prepositions, conjunctions
+        stop_words = [
+            'il', 'la', 'lo', 'le', 'gli', 'i', 'un', 'una', 'uno', 'del', 'della',
+            'dei', 'delle', 'degli', 'al', 'alla', 'alle', 'agli', 'dal', 'dalla',
+            'dalle', 'dagli', 'nel', 'nella', 'nelle', 'negli', 'sul', 'sulla',
+            'sulle', 'sugli', 'per', 'con', 'tra', 'fra', 'di', 'da', 'in', 'su',
+            'a', 'e', 'o', 'ma', 'però', 'quindi', 'anche', 'ancora', 'già'
+        ]
+        
+        text = user_query.lower()
+        
+        # Remove courtesy phrases
+        for phrase in courtesy_words:
+            text = text.replace(phrase, ' ')
+        
+        # Split into words and filter
+        words = text.split()
+        filtered_words = []
+        
+        for word in words:
+            # Remove punctuation
+            word = re.sub(r'[^\w\s]', '', word)
+            # Keep if not a stop word and length > 2
+            if word and word not in stop_words and len(word) > 2:
+                filtered_words.append(word)
+        
+        return ' '.join(filtered_words[:10])  # Limit to 10 words
+    
     def load_scraping_database(self):
         try:
             if os.path.exists(self.scraping_db_path):
@@ -121,9 +224,10 @@ class UniMiIntegratedBot:
         if database_path and os.path.exists(database_path):
             return database_path
         
+        # Updated patterns to include the new enhanced database
         patterns = [
-            'unimi_fast_database_*.json',
             'unimi_enhanced_database_*.json',
+            'unimi_fast_database_*.json', 
             'unimi_vector_database_*.json'
         ]
         
@@ -132,7 +236,7 @@ class UniMiIntegratedBot:
             database_files.extend(glob.glob(pattern))
         
         if not database_files:
-            raise FileNotFoundError("No UniMi database found. Please run the crawler first.")
+            raise FileNotFoundError("No UniMi database found. Please run the enhanced crawler first.")
         
         latest_file = max(database_files, key=os.path.getctime)
         print(f"📂 Using database: {latest_file}")
@@ -152,7 +256,7 @@ class UniMiIntegratedBot:
             if not self.database:
                 raise ValueError("Database contains no pages")
             
-            # Verify database structure
+            # Verify database structure for enhanced database
             sample_page = self.database[0]
             required_fields = ['id', 'url', 'title', 'embedding']
             missing_fields = [field for field in required_fields if field not in sample_page]
@@ -162,11 +266,23 @@ class UniMiIntegratedBot:
             
             embedding_dimension = len(sample_page['embedding']) if sample_page.get('embedding') else 0
             
+            # Check if it's the enhanced database with links
+            has_enhanced_features = 'links' in sample_page
+            
             print(f"✅ Database loaded successfully:")
+            print(f"   - Type: {'Enhanced' if has_enhanced_features else 'Standard'} Database")
             print(f"   - Pages: {len(self.database)}")
             print(f"   - Domain: {self.database_info.get('domain', 'unknown')}")
             print(f"   - Embedding dimension: {embedding_dimension}")
+            print(f"   - Version: {self.database_info.get('version', 'unknown')}")
             print(f"   - Created: {self.database_info.get('created_at', 'unknown')}")
+            
+            if has_enhanced_features:
+                # Show enhanced features statistics
+                total_internal_links = sum(len(page.get('links', {}).get('internal_links', [])) for page in self.database)
+                total_internal_pdfs = sum(len(page.get('links', {}).get('internal_pdfs', [])) for page in self.database)
+                print(f"   - Total internal links: {total_internal_links}")
+                print(f"   - Total internal PDFs: {total_internal_pdfs}")
             
             return True
             
@@ -190,10 +306,15 @@ class UniMiIntegratedBot:
         if not self.database:
             raise ValueError("Database not loaded")
         
-        print(f"🔍 Searching for: '{query}'")
-        self.current_query = query
+        print(f"🔍 Original query: '{query}'")
         
-        query_embedding = self.create_query_embedding(query)
+        # Clean the query using AI
+        cleaned_query = self.clean_user_query(query)
+        print(f"🎯 Searching with cleaned query: '{cleaned_query}'")
+        
+        self.current_query = query  # Keep original for response generation
+        
+        query_embedding = self.create_query_embedding(cleaned_query)
         if query_embedding is None:
             raise ValueError("Unable to create query embedding")
         
@@ -229,7 +350,7 @@ class UniMiIntegratedBot:
             similarity_score = similarities[idx]
             page = valid_pages[idx]
             
-            # Extract content information based on database structure
+            # Extract content information based on enhanced database structure
             content_info = self.extract_page_content_info(page)
             
             result = {
@@ -244,26 +365,36 @@ class UniMiIntegratedBot:
                 'crawled_at': page.get('crawled_at', ''),
                 'content_preview': content_info.get('preview', ''),
                 'has_pdf': content_info.get('has_pdf', False),
-                'pdf_count': content_info.get('pdf_count', 0)
+                'pdf_count': content_info.get('pdf_count', 0),
+                'internal_links_count': content_info.get('internal_links_count', 0),
+                'internal_pdfs_count': content_info.get('internal_pdfs_count', 0),
+                'timing': page.get('timing', {}),
+                # Include enhanced database link information
+                'links': page.get('links', {})
             }
             results.append(result)
         
-        print(f"✅ Found {len(results)} relevant pages (similarity > 0.1: {sum(1 for r in results if r['similarity_score'] > 0.1)})")
+        print(f"✅ Found {len(results)} relevant pages")
+        print(f"   - High relevance (>0.3): {sum(1 for r in results if r['similarity_score'] > 0.3)}")
+        print(f"   - Medium relevance (0.1-0.3): {sum(1 for r in results if 0.1 <= r['similarity_score'] <= 0.3)}")
+        print(f"   - Low relevance (<0.1): {sum(1 for r in results if r['similarity_score'] < 0.1)}")
         
         self.search_results = results
         return results
     
     def extract_page_content_info(self, page):
-        """Extract content information from different database structures"""
+        """Extract content information from enhanced database structure"""
         content_info = {
             'content_length': 0,
             'preview': '',
             'has_pdf': False,
             'pdf_count': 0,
+            'internal_links_count': 0,
+            'internal_pdfs_count': 0,
             'main_content': ''
         }
         
-        # Handle new fast crawler structure
+        # Handle enhanced database structure
         if 'content' in page and isinstance(page['content'], dict):
             content_data = page['content']
             content_info['content_length'] = content_data.get('content_length', 0)
@@ -271,6 +402,8 @@ class UniMiIntegratedBot:
             content_info['preview'] = content_data.get('main_content', '')[:300] + '...' if content_data.get('main_content') else ''
             content_info['pdf_count'] = content_data.get('pdfs_count', 0)
             content_info['has_pdf'] = content_data.get('pdfs_count', 0) > 0 or bool(content_data.get('pdf_content'))
+            content_info['internal_links_count'] = content_data.get('internal_links_count', 0)
+            content_info['internal_pdfs_count'] = content_data.get('internal_pdfs_count', 0)
         
         # Handle legacy structure
         elif 'content_preview' in page:
@@ -284,6 +417,26 @@ class UniMiIntegratedBot:
             content_info['preview'] = page['main_content'][:300] + '...' if page['main_content'] else ''
         
         return content_info
+    
+    def get_database_content(self, url):
+        """Get content directly from the vector database if available"""
+        for page in self.database:
+            if page['url'] == url:
+                content_info = self.extract_page_content_info(page)
+                if content_info['main_content']:
+                    return {
+                        'url': url,
+                        'title': page.get('title', ''),
+                        'description': page.get('description', ''),
+                        'content': content_info['main_content'],
+                        'content_length': content_info['content_length'],
+                        'source': 'vector_database',
+                        'scraped_at': page.get('crawled_at', ''),
+                        # Include enhanced database features
+                        'links': page.get('links', {}),
+                        'timing': page.get('timing', {})
+                    }
+        return None
     
     def extract_page_content(self, soup, url):
         try:
@@ -382,23 +535,6 @@ class UniMiIntegratedBot:
         self.scraping_database['pages'][url] = page_data
         self.save_scraping_database()
     
-    def get_database_content(self, url):
-        """Get content directly from the vector database if available"""
-        for page in self.database:
-            if page['url'] == url:
-                content_info = self.extract_page_content_info(page)
-                if content_info['main_content']:
-                    return {
-                        'url': url,
-                        'title': page.get('title', ''),
-                        'description': page.get('description', ''),
-                        'content': content_info['main_content'],
-                        'content_length': content_info['content_length'],
-                        'source': 'vector_database',
-                        'scraped_at': page.get('crawled_at', '')
-                    }
-        return None
-    
     def scrape_top_pages(self):
         if not self.search_results:
             raise ValueError("No search results available")
@@ -444,7 +580,11 @@ class UniMiIntegratedBot:
                     'search_title': result['title'],
                     'search_description': result['description'],
                     'has_pdf': result.get('has_pdf', False),
-                    'pdf_count': result.get('pdf_count', 0)
+                    'pdf_count': result.get('pdf_count', 0),
+                    'internal_links_count': result.get('internal_links_count', 0),
+                    'internal_pdfs_count': result.get('internal_pdfs_count', 0),
+                    'links': result.get('links', {}),
+                    'timing': result.get('timing', {})
                 })
                 self.scraped_pages.append(page_data)
             else:
@@ -465,6 +605,7 @@ class UniMiIntegratedBot:
         
         prompt = f"""Sei un assistente esperto dell'Università Statale di Milano (UniMi). 
 Un utente ha fatto questa domanda: "{self.current_query}"
+La query è stata ottimizzata per la ricerca semantica in: "{self.cleaned_query}"
 
 Ho raccolto informazioni da {len(self.scraped_pages)} pagine del sito unimi.it per aiutarti a rispondere. 
 Devi fornire una risposta completa in formato LaTeX che includa:
@@ -504,12 +645,24 @@ CONTENUTO DELLE PAGINE ANALIZZATE:
             if pages_added >= 12:  # Limit number of pages
                 break
                 
+            # Include enhanced database information
+            enhanced_info = ""
+            if page.get('links'):
+                links_data = page['links']
+                internal_links_count = len(links_data.get('internal_links', []))
+                internal_pdfs_count = len(links_data.get('internal_pdfs', []))
+                enhanced_info = f"\nLink interni: {internal_links_count}, PDF interni: {internal_pdfs_count}"
+            
+            if page.get('timing'):
+                timing = page['timing']
+                enhanced_info += f"\nTempo elaborazione: scraping {timing.get('scraping_time', 0)}s, embedding {timing.get('embedding_time', 0)}s"
+                
             page_content = f"""
 --- PAGINA {page['rank']} (Rilevanza: {page['similarity_score']:.4f}) ---
 URL: {page['url']}
 Titolo: {page['title']}
 Descrizione: {page.get('description', page.get('search_description', ''))}
-Fonte: {page.get('source', 'unknown')}
+Fonte: {page.get('source', 'unknown')}{enhanced_info}
 Contenuto: {page['content'][:3000]}{'...' if len(page['content']) > 3000 else ''}
 
 """
@@ -528,6 +681,7 @@ Contenuto: {page['content'][:3000]}{'...' if len(page['content']) > 3000 else ''
 GENERA UNA RISPOSTA COMPLETA IN FORMATO LaTeX che aiuti concretamente l'utente a risolvere la sua domanda.
 La risposta deve essere pronta per la compilazione LaTeX e ben strutturata.
 Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate.
+Ricorda che la query originale era: "{self.current_query}" e quella ottimizzata: "{self.cleaned_query}"
 """
         
         print(f"📝 Generated prompt with {total_tokens} tokens using {pages_added} pages")
@@ -570,29 +724,68 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
         clean_query = re.sub(r'\s+', '_', clean_query)
         
         # Save LaTeX file
-        latex_filename = f'unimi_response_{clean_query}_{timestamp}.tex'
+        latex_filename = f'unimi_enhanced_response_{clean_query}_{timestamp}.tex'
         with open(latex_filename, 'w', encoding='utf-8') as f:
             f.write(ai_response)
         
-        # Save detailed text report
-        txt_filename = f'unimi_response_{clean_query}_{timestamp}.txt'
+        # Save detailed text report with enhanced information
+        txt_filename = f'unimi_enhanced_response_{clean_query}_{timestamp}.txt'
         with open(txt_filename, 'w', encoding='utf-8') as f:
-            f.write("UNIVERSITÀ STATALE DI MILANO - RISPOSTA AI\n")
+            f.write("UNIVERSITÀ STATALE DI MILANO - RISPOSTA AI ENHANCED\n")
             f.write("=" * 60 + "\n")
-            f.write(f"DOMANDA: {self.current_query}\n")
+            f.write(f"DOMANDA ORIGINALE: {self.current_query}\n")
+            f.write(f"QUERY OTTIMIZZATA: {self.cleaned_query}\n")
             f.write(f"DATA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"PAGINE TROVATE: {len(self.search_results)}\n")
             f.write(f"PAGINE ANALIZZATE: {len(self.scraped_pages)}\n")
             f.write(f"DATABASE: {self.database_info.get('name', 'Unknown')}\n")
+            f.write(f"VERSIONE DB: {self.database_info.get('version', 'Unknown')}\n")
             f.write(f"MODELLO EMBEDDING: {self.embedding_model_name}\n")
             f.write(f"MODELLO AI: {self.model_name}\n\n")
             
+            # Enhanced database statistics
+            if self.database_info.get('features'):
+                f.write("CARATTERISTICHE DATABASE:\n")
+                for feature in self.database_info['features']:
+                    f.write(f"• {feature}\n")
+                f.write("\n")
+            
             f.write("PAGINE PIÙ RILEVANTI:\n")
             f.write("-" * 40 + "\n")
-            for page in sorted(self.scraped_pages, key=lambda x: x.get('similarity_score', 0), reverse=True)[:5]:
+            for page in sorted(self.scraped_pages, key=lambda x: x.get('similarity_score', 0), reverse=True)[:10]:
                 f.write(f"• {page['title']} (Score: {page.get('similarity_score', 0):.4f})\n")
                 f.write(f"  {page['url']}\n")
-                f.write(f"  Source: {page.get('source', 'unknown')}\n\n")
+                f.write(f"  Source: {page.get('source', 'unknown')}\n")
+                
+                # Include enhanced database information
+                if page.get('internal_links_count', 0) > 0:
+                    f.write(f"  Link interni: {page['internal_links_count']}\n")
+                if page.get('internal_pdfs_count', 0) > 0:
+                    f.write(f"  PDF interni: {page['internal_pdfs_count']}\n")
+                if page.get('timing'):
+                    timing = page['timing']
+                    f.write(f"  Timing: scrape {timing.get('scraping_time', 0):.3f}s, embed {timing.get('embedding_time', 0):.3f}s\n")
+                f.write("\n")
+            
+            # Query cleaning analysis
+            f.write("ANALISI QUERY CLEANING:\n")
+            f.write("-" * 40 + "\n")
+            f.write(f"Query originale: {self.current_query}\n")
+            f.write(f"Query ottimizzata: {self.cleaned_query}\n")
+            f.write(f"Parole rimosse: {len(self.current_query.split()) - len(self.cleaned_query.split())}\n")
+            f.write(f"Efficacia pulizia: {(1 - len(self.cleaned_query)/len(self.current_query))*100:.1f}% riduzione\n\n")
+            
+            # Search performance analysis
+            high_relevance = sum(1 for r in self.search_results if r['similarity_score'] > 0.3)
+            medium_relevance = sum(1 for r in self.search_results if 0.1 <= r['similarity_score'] <= 0.3)
+            low_relevance = sum(1 for r in self.search_results if r['similarity_score'] < 0.1)
+            
+            f.write("PERFORMANCE RICERCA:\n")
+            f.write("-" * 40 + "\n")
+            f.write(f"Alta rilevanza (>0.3): {high_relevance}\n")
+            f.write(f"Media rilevanza (0.1-0.3): {medium_relevance}\n")
+            f.write(f"Bassa rilevanza (<0.1): {low_relevance}\n")
+            f.write(f"Score medio: {np.mean([r['similarity_score'] for r in self.search_results]):.4f}\n\n")
             
             f.write("RISPOSTA LaTeX:\n")
             f.write("=" * 60 + "\n\n")
@@ -600,7 +793,7 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
         
         print(f"💾 Results saved:")
         print(f"   - LaTeX: {latex_filename}")
-        print(f"   - Report: {txt_filename}")
+        print(f"   - Enhanced Report: {txt_filename}")
         
         return latex_filename, txt_filename
     
@@ -614,7 +807,7 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
                 if not self.load_database(database_path):
                     raise ValueError("Unable to load database")
             
-            # Perform semantic search
+            # Perform semantic search with AI query cleaning
             search_results = self.semantic_search(query, top_k)
             
             if not search_results:
@@ -632,10 +825,15 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
             prompt = self.create_latex_ai_prompt()
             ai_response = self.generate_ai_response(prompt)
             
-            # Save results
+            # Save results with enhanced information
             files = self.save_results(ai_response)
             
             print(f"✅ Query processing completed successfully!")
+            print(f"   - Original query: '{self.current_query}'")
+            print(f"   - Cleaned query: '{self.cleaned_query}'")
+            print(f"   - Pages found: {len(self.search_results)}")
+            print(f"   - Pages processed: {len(self.scraped_pages)}")
+            
             return ai_response
             
         except Exception as e:
@@ -644,12 +842,17 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
     
     def interactive_mode(self, database_path=None):
         print("\n" + "="*60)
-        print("🎓 UniMi Integrated Bot - Interactive Mode")
+        print("🎓 Enhanced UniMi Search Bot - Interactive Mode")
         print("="*60)
+        print("Features:")
+        print("  - AI-powered query cleaning for better semantic search")
+        print("  - Enhanced database with links and timing information")
+        print("  - Improved LaTeX response generation")
         print("Commands:")
         print("  - Type your question in Italian")
         print("  - 'reload' to reload database")
-        print("  - 'stats' to show database statistics") 
+        print("  - 'stats' to show database statistics")
+        print("  - 'test-clean <query>' to test query cleaning")
         print("  - 'quit' to exit")
         print("="*60)
         
@@ -677,11 +880,38 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
                     continue
                 
                 if query.lower() == 'stats':
-                    print(f"\n📊 Database Statistics:")
+                    print(f"\n📊 Enhanced Database Statistics:")
                     print(f"   - Pages: {len(self.database)}")
                     print(f"   - Domain: {self.database_info.get('domain', 'unknown')}")
+                    print(f"   - Version: {self.database_info.get('version', 'unknown')}")
                     print(f"   - Created: {self.database_info.get('created_at', 'unknown')}")
                     print(f"   - Cached pages: {len(self.scraping_database.get('pages', {}))}")
+                    
+                    if self.database_info.get('features'):
+                        print("   - Features:")
+                        for feature in self.database_info['features']:
+                            print(f"     • {feature}")
+                    
+                    # Calculate enhanced statistics
+                    if len(self.database) > 0:
+                        total_internal_links = sum(len(page.get('links', {}).get('internal_links', [])) for page in self.database)
+                        total_internal_pdfs = sum(len(page.get('links', {}).get('internal_pdfs', [])) for page in self.database)
+                        pages_with_timing = sum(1 for page in self.database if page.get('timing'))
+                        
+                        print(f"   - Total internal links: {total_internal_links}")
+                        print(f"   - Total internal PDFs: {total_internal_pdfs}")
+                        print(f"   - Pages with timing data: {pages_with_timing}")
+                    
+                    continue
+                
+                if query.lower().startswith('test-clean '):
+                    test_query = query[11:].strip()
+                    if test_query:
+                        print(f"🧹 Testing query cleaning:")
+                        print(f"   Original: '{test_query}'")
+                        cleaned = self.clean_user_query(test_query)
+                        print(f"   Cleaned:  '{cleaned}'")
+                        print(f"   Reduction: {(1 - len(cleaned)/len(test_query))*100:.1f}%")
                     continue
                 
                 if not query:
@@ -691,12 +921,14 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
                 # Reset state
                 self.search_results = []
                 self.scraped_pages = []
+                self.cleaned_query = ""
                 
-                # Process query
+                # Process query with AI cleaning
                 result = self.process_query(query, top_k=15)
                 
                 if result:
                     print("✅ Response generated and saved successfully!")
+                    print(f"📈 Query cleaning effectiveness: {(1 - len(self.cleaned_query)/len(query))*100:.1f}% reduction")
                 else:
                     print("❌ No results found or error occurred")
                 
@@ -707,24 +939,26 @@ Ricorda di includere tutti i dettagli importanti trovati nelle pagine analizzate
                 print(f"❌ Error: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='UniMi Integrated Search Bot')
-    parser.add_argument('--database', '-d', help='Path to vector database file')
+    parser = argparse.ArgumentParser(description='Enhanced UniMi Search Bot with AI Query Cleaning')
+    parser.add_argument('--database', '-d', help='Path to enhanced vector database file')
     parser.add_argument('--query', '-q', help='Specific question to ask')
-    parser.add_argument('--groq-key', '-k', help='Groq API key')
+    parser.add_argument('--groq-key', '-k', help='Groq API key (defaults to embedded key)')
     parser.add_argument('--ai-model', '-m', default='openai/gpt-oss-20b',
-                       choices=['openai/gpt-oss-20b', 'mixtral-8x7b-32768', 'llama3-8b-8192'])
+                       choices=['openai/gpt-oss-20b', 'mixtral-8x7b-32768', 'openai/gpt-oss-20b'])
     parser.add_argument('--embedding-model', '-e', default='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')
     parser.add_argument('--top-k', '-t', type=int, default=15, help='Number of pages to retrieve')
     parser.add_argument('--delay', type=float, default=0.3, help='Delay between requests (seconds)')
     parser.add_argument('--interactive', '-i', action='store_true', help='Run in interactive mode')
     parser.add_argument('--max-content', type=int, default=8000, help='Maximum content length per page')
+    parser.add_argument('--no-query-cleaning', action='store_true', help='Disable AI query cleaning')
     
     args = parser.parse_args()
     
     try:
-        print("🚀 Initializing UniMi Integrated Bot...")
+        print("🚀 Initializing Enhanced UniMi Search Bot...")
+        print("   Features: AI Query Cleaning, Enhanced Database Support, Improved LaTeX Generation")
         
-        bot = UniMiIntegratedBot(
+        bot = EnhancedUniMiBot(
             groq_api_key=args.groq_key,
             model_name=args.ai_model,
             embedding_model_name=args.embedding_model
@@ -741,6 +975,8 @@ def main():
             result = bot.process_query(args.query, args.database, args.top_k)
             if result:
                 print("✅ Query processed successfully")
+                print(f"📊 Original query: '{bot.current_query}'")
+                print(f"🎯 Cleaned query: '{bot.cleaned_query}'")
                 print("\nFirst 200 characters of response:")
                 print("-" * 50)
                 print(result[:200] + "..." if len(result) > 200 else result)
