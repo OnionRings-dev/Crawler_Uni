@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniMi Search Bot</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="#" class="logo">UniMi Bot</a>
+            <ul class="nav-links" id="navLinks">
+                <li><a href="#" onclick="showSection('landing')" class="active">Home</a></li>
+                <li><a href="#" onclick="showSection('search')">Search</a></li>
+                <li><a href="#">About</a></li>
+            </ul>
+            <button class="mobile-menu" onclick="toggleMobileMenu()">☰</button>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <!-- Landing Section -->
+        <section id="landingSection" class="landing-section">
+            <div class="hero-content">
+                <h1 class="hero-title">UniMi Search Bot</h1>
+                <p class="hero-subtitle">Trova rapidamente le informazioni che cerchi nei documenti universitari attraverso ricerca intelligente</p>
+                <button class="cta-button" onclick="showSection('search')">Inizia la ricerca</button>
+            </div>
+            
+            <div class="features-section">
+                <div class="feature-item">
+                    <div class="feature-number">01</div>
+                    <h3 class="feature-title">Ricerca precisa</h3>
+                    <p class="feature-desc">Algoritmi avanzati per trovare esattamente le informazioni che stai cercando nel database universitario.</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-number">02</div>
+                    <h3 class="feature-title">Risultati contestualizzati</h3>
+                    <p class="feature-desc">Le risposte sono organizzate e presentate in modo chiaro, con riferimenti alle fonti originali.</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-number">03</div>
+                    <h3 class="feature-title">Sempre aggiornato</h3>
+                    <p class="feature-desc">Database costantemente aggiornato con le ultime informazioni e procedure universitarie.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Search Section -->
+        <section id="searchSection" class="search-section">
+            <div class="search-container">
+                <div class="search-header">
+                    <h1 class="search-title">Cosa stai cercando?</h1>
+                    <p class="search-subtitle">Digita la tua domanda e ricevi una risposta precisa</p>
+                </div>
+                
+                <div class="search-input-section">
+                    <div class="search-input-container">
+                        <input 
+                            type="text" 
+                            id="searchInput" 
+                            class="search-input" 
+                            placeholder="Es. Come faccio a cambiare corso di laurea?"
+                        />
+                    </div>
+                    <button class="search-button" id="searchButton" onclick="performSearch()">
+                        Cerca
+                    </button>
+                </div>
+                
+                <div class="thinking-indicator" id="thinkingIndicator">
+                    Elaborazione in corso
+                    <div class="thinking-dots">
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                    </div>
+                </div>
+                
+                <div class="results-container" id="resultsContainer">
+                    <div class="results-content" id="resultsContent"></div>
+                    <button class="clear-button" onclick="clearSearch()">Nuova ricerca</button>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="status-bar" id="statusBar">
+        <span id="statusText">Ready</span>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
