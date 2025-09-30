@@ -10,19 +10,17 @@ from collections import deque
 from datetime import datetime
 import numpy as np
 from sentence_transformers import SentenceTransformer
-import random
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-class FastUniMiCrawler:
-    def __init__(self, delay=0.1, max_workers=5, debug=True):
+class UniversalDomainCrawler:
+    def __init__(self, base_url, delay=0.1, max_workers=5, target_pages=1000):
         self.delay = delay
         self.max_workers = max_workers
-        self.target_pages = 1000
-        self.base_url = 'https://unimi.it'
+        self.target_pages = target_pages
+        self.base_url = base_url if base_url.startswith('http') else f'https://{base_url}'
         self.domain = urlparse(self.base_url).netloc
-        self.debug = debug
         
         self.pages_database = []
         self.embedding_model = None
@@ -56,12 +54,6 @@ class FastUniMiCrawler:
         except Exception as e:
             print(f"❌ Error loading model: {e}")
             raise
-    
-    def debug_log(self, message):
-        """Log debug messages with timestamp if debug mode is enabled"""
-        if self.debug:
-            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"[{timestamp}] {message}")
     
     def create_session(self):
         session = requests.Session()
@@ -139,7 +131,6 @@ class FastUniMiCrawler:
         main_content = re.sub(r'\s+', ' ', main_content).strip()[:4000]
         content_data['main_content'] = main_content
         
-        # Estrai tutti i link e classifica interno/esterno
         for link in soup.find_all('a', href=True, limit=100):
             href = link.get('href')
             if href:
@@ -155,11 +146,9 @@ class FastUniMiCrawler:
                 
                 content_data['all_links'].append(link_data)
                 
-                # Classifica come interno se appartiene al dominio UniMi
                 if self.is_valid_url(absolute_url):
                     content_data['internal_links'].append(link_data)
                 
-                # Gestisci PDF
                 if href.lower().endswith('.pdf'):
                     pdf_data = {
                         'url': absolute_url,
@@ -176,7 +165,6 @@ class FastUniMiCrawler:
         return content_data
     
     def is_internal_pdf(self, pdf_url):
-        """Verifica se un PDF appartiene al dominio UniMi"""
         try:
             parsed = urlparse(pdf_url)
             return parsed.netloc == self.domain or parsed.netloc.endswith('.' + self.domain)
@@ -204,7 +192,6 @@ class FastUniMiCrawler:
         return ""
     
     def create_embedding(self, text):
-        """Create embedding with timing"""
         start_time = time.time()
         
         try:
@@ -234,15 +221,12 @@ class FastUniMiCrawler:
         scraping_start = time.time()
         session = self.create_session()
         
-        self.debug_log(f"🔍 Processing: {url}")
-        
         try:
             response = session.get(url, timeout=10)
             response.raise_for_status()
             
             content_type = response.headers.get('content-type', '')
             if 'text/html' not in content_type.lower():
-                self.debug_log(f"❌ Non-HTML content type: {content_type}")
                 return None, []
             
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -252,20 +236,14 @@ class FastUniMiCrawler:
             
             pdf_content = ""
             if content_data['internal_pdfs']:
-                self.debug_log(f"📄 Extracting PDF content from {len(content_data['internal_pdfs'])} PDFs")
                 pdf_content = self.extract_pdf_text_fast(content_data['internal_pdfs'][0]['url'], session)
             
             scraping_time = time.time() - scraping_start
-            self.debug_log(f"⏱️ Scraping completed in {scraping_time:.3f}s")
             
-            # Create embedding with timing
             combined_text = f"{title} {description} {keywords} {content_data['main_content'][:2000]} {pdf_content}".strip()
             
-            self.debug_log("🧠 Creating embedding...")
             embedding, embedding_time = self.create_embedding(combined_text)
-            self.debug_log(f"⏱️ Embedding completed in {embedding_time:.3f}s")
             
-            # Update timing stats
             with self.lock:
                 self.stats['total_scraping_time'] += scraping_time
                 self.stats['total_embedding_time'] += embedding_time
@@ -294,7 +272,7 @@ class FastUniMiCrawler:
                     'links': {
                         'internal_links': content_data['internal_links'],
                         'internal_pdfs': content_data['internal_pdfs'],
-                        'all_links': content_data['all_links'][:50],  # Limita per non appesantire il DB
+                        'all_links': content_data['all_links'][:50],
                         'all_pdfs': content_data['all_pdfs']
                     },
                     'embedding': embedding,
@@ -313,25 +291,20 @@ class FastUniMiCrawler:
                     if self.is_valid_url(normalized):
                         valid_links.append(normalized)
                 
-                total_time = scraping_time + embedding_time
-                self.debug_log(f"✅ Completed {url} in {total_time:.3f}s (scrape: {scraping_time:.3f}s, embed: {embedding_time:.3f}s)")
-                
                 return page_record, valid_links
             
         except Exception as e:
             with self.lock:
                 self.stats['total_failed'] += 1
-            self.debug_log(f"❌ Error processing {url}: {str(e)}")
         
         finally:
             session.close()
         
         return None, []
     
-    def crawl_unimi_fast(self):
-        print(f"\n🚀 Fast crawling {self.target_pages} pages from {self.base_url}")
+    def crawl_domain(self):
+        print(f"\n🚀 Crawling {self.target_pages} pages from {self.base_url}")
         print(f"Using {self.max_workers} parallel workers")
-        print(f"Debug mode: {'ON' if self.debug else 'OFF'}")
         
         visited_urls = set()
         url_queue = deque([self.base_url])
@@ -373,7 +346,7 @@ class FastUniMiCrawler:
                                     found_urls.add(link)
                         
                     except Exception as e:
-                        self.debug_log(f"❌ Future error: {str(e)}")
+                        pass
             
             if pages_processed % 20 == 0:
                 avg_scrape = self.stats['average_scraping_time']
@@ -391,27 +364,21 @@ class FastUniMiCrawler:
         
         database = {
             'database_info': {
-                'name': 'UniMi Fast Vector Database Enhanced',
-                'version': '2.2',
-                'created_at': datetime.now().isoformat(),
                 'domain': self.domain,
+                'name': f'{self.domain} Vector Database',
+                'version': '2.3',
+                'created_at': datetime.now().isoformat(),
+                'base_url': self.base_url,
                 'total_pages': len(self.pages_database),
                 'embedding_model': 'paraphrase-multilingual-MiniLM-L12-v2',
-                'crawling_stats': self.stats,
-                'features': [
-                    'Internal links tracking',
-                    'Internal PDFs tracking', 
-                    'Scraping timing',
-                    'Embedding timing',
-                    'Debug logging',
-                    'Enhanced metadata'
-                ]
+                'crawling_stats': self.stats
             },
             'pages': self.pages_database
         }
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f'unimi_enhanced_database_{timestamp}.json'
+        domain_clean = self.domain.replace('.', '_')
+        filename = f'{domain_clean}_database_{timestamp}.json'
         
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(database, f, ensure_ascii=False, indent=2, default=str)
@@ -420,10 +387,10 @@ class FastUniMiCrawler:
         return filename
     
     def run(self):
-        print("🤖 UniMi Enhanced Crawler & Vector Database Creator")
+        print("🤖 Universal Domain Crawler & Vector Database Creator")
         print("=" * 50)
         
-        crawled_count = self.crawl_unimi_fast()
+        crawled_count = self.crawl_domain()
         
         if crawled_count > 0:
             self.save_database()
@@ -435,26 +402,22 @@ class FastUniMiCrawler:
         duration = datetime.now() - self.stats['start_time']
         
         print("\n" + "=" * 50)
-        print("📊 ENHANCED SUMMARY")
+        print("📊 SUMMARY")
         print("=" * 50)
+        print(f"Domain: {self.domain}")
         print(f"Pages crawled: {len(self.pages_database)}")
         print(f"PDFs extracted: {self.stats['pdfs_extracted']}")
         print(f"Failed requests: {self.stats['total_failed']}")
         print(f"Total duration: {duration}")
         print(f"Crawling speed: {len(self.pages_database)/(duration.total_seconds()/60):.1f} pages/min")
-        print("\n📈 TIMING ANALYSIS:")
-        print(f"Total scraping time: {self.stats['total_scraping_time']:.2f}s")
-        print(f"Total embedding time: {self.stats['total_embedding_time']:.2f}s")
-        print(f"Average scraping time: {self.stats['average_scraping_time']:.3f}s per page")
+        print(f"\nAverage scraping time: {self.stats['average_scraping_time']:.3f}s per page")
         print(f"Average embedding time: {self.stats['average_embedding_time']:.3f}s per page")
         
         if len(self.pages_database) > 0:
-            # Calcola statistiche sui link
             total_internal_links = sum(page['content']['internal_links_count'] for page in self.pages_database)
             total_internal_pdfs = sum(page['content']['internal_pdfs_count'] for page in self.pages_database)
             
-            print(f"\n🔗 LINK STATISTICS:")
-            print(f"Total internal links found: {total_internal_links}")
+            print(f"\nTotal internal links found: {total_internal_links}")
             print(f"Total internal PDFs found: {total_internal_pdfs}")
             print(f"Average internal links per page: {total_internal_links/len(self.pages_database):.1f}")
             print(f"Average internal PDFs per page: {total_internal_pdfs/len(self.pages_database):.1f}")
@@ -462,8 +425,27 @@ class FastUniMiCrawler:
         print("=" * 50)
 
 def main():
-    # Puoi disabilitare il debug impostando debug=False
-    crawler = FastUniMiCrawler(delay=0.05, max_workers=5, debug=True)
+    print("=" * 50)
+    print("Universal Domain Crawler")
+    print("=" * 50)
+    
+    domain = input("\nEnter the domain to crawl (e.g., www.unimi.it or unimi.it): ").strip()
+    
+    if not domain:
+        print("❌ No domain provided")
+        return
+    
+    try:
+        target_pages = int(input("Enter number of pages to crawl (default: 1000): ").strip() or "1000")
+    except ValueError:
+        target_pages = 1000
+    
+    try:
+        max_workers = int(input("Enter number of parallel workers (default: 5): ").strip() or "5")
+    except ValueError:
+        max_workers = 5
+    
+    crawler = UniversalDomainCrawler(domain, delay=0.05, max_workers=max_workers, target_pages=target_pages)
     crawler.run()
 
 if __name__ == "__main__":
