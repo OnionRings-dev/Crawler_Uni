@@ -548,11 +548,10 @@ Ho raccolto informazioni da {len(self.scraped_pages)} pagine del sito {self.curr
 LA RISPOSTA DATA DEVE CONTENERE SOLAMENTE I DATI CONTENUTI NEI FILE CHE TI VENGONO PASSATI, NON IMPROVVISARE NESSUNA RISPOSTA O INFORMAZIONE. 
 Devi fornire una risposta completa in formato LaTeX che includa:
 
-1. **SEZIONE INTRODUTTIVA**: Riassunto della domanda e panoramica della risposta
-2. **RISPOSTA DIRETTA**: Risposta chiara e concisa alla domanda specifica  
-3. **GUIDA PASSO-PASSO**: Una guida dettagliata numerata su come completare/risolvere quanto richiesto
-4. **LINK E RISORSE**: Solo i link più pertinenti e utili organizzati per categoria
-5. **NOTE AGGIUNTIVE**: Eventuali avvertenze, scadenze, requisiti importanti
+1. **RISPOSTA DIRETTA**: Risposta chiara e concisa alla domanda specifica  
+2. **GUIDA PASSO-PASSO**: Una guida dettagliata numerata su come completare/risolvere quanto richiesto
+3. **LINK E RISORSE**: Solo i link più pertinenti e utili organizzati per categoria
+4. **NOTE AGGIUNTIVE**: Eventuali avvertenze, scadenze, requisiti importanti
 
 REQUISITI PER IL FORMATO LaTeX:
 - Usa \\documentclass{{article}} con pacchetti italiani

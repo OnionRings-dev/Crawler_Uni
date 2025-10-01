@@ -10,11 +10,12 @@ import os
 import sys
 import glob
 import re
+from flask import send_file
 
 from final_searcher import MultiDomainSearchBot, get_all_domains
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
 
 bot = None
 current_status = {"status": "idle", "message": "", "progress": 0}
@@ -87,6 +88,7 @@ def process_query_async(query, domain, request_id):
         if not bot.database or bot.current_domain != domain:
             current_status["message"] = f"Loading database for domain {domain}..."
             current_status["progress"] = 30
+            current_status["request_id"] = request_id
             if not bot.load_database_by_domain(domain):
                 current_status = {
                     "status": "error", 
@@ -98,19 +100,31 @@ def process_query_async(query, domain, request_id):
         
         current_status["message"] = "Performing semantic search..."
         current_status["progress"] = 50
+        current_status["request_id"] = request_id
         
         result = bot.process_query(query, domain, top_k=15)
         
         current_status["message"] = "Reading generated LaTeX file..."
         current_status["progress"] = 80
+        current_status["request_id"] = request_id
         
-        time.sleep(1)
+        time.sleep(2)  # Aumenta da 1 a 2 secondi
+        
+        print(f"Current directory: {os.getcwd()}")
+        print(f"Looking for LaTeX files matching domain: {domain}")
         
         latex_file_path = find_latest_response_file(query, domain)
         
+        print(f"Found LaTeX file: {latex_file_path}")
+        
         if latex_file_path and os.path.exists(latex_file_path):
+            print(f"File exists: True")
+            print(f"Full path: {os.path.abspath(latex_file_path)}")
+            
             latex_content = read_latex_file(latex_file_path)
+            
             if latex_content:
+                print(f"LaTeX content loaded: {len(latex_content)} characters")
                 current_status = {
                     "status": "completed", 
                     "message": "Query processed successfully", 
@@ -127,9 +141,16 @@ def process_query_async(query, domain, request_id):
                         "timestamp": datetime.now().isoformat()
                     }
                 }
+                print("Status updated to completed with LaTeX content")
                 return
+            else:
+                print("Failed to read LaTeX content from file")
+        else:
+            print(f"LaTeX file not found or doesn't exist")
         
+        # Fallback se il file non viene trovato
         if result:
+            print("Using in-memory result as fallback")
             current_status = {
                 "status": "completed", 
                 "message": "Query processed (using in-memory result)", 
@@ -156,6 +177,8 @@ def process_query_async(query, domain, request_id):
     
     except Exception as e:
         print(f"Error in process_query_async: {e}")
+        import traceback
+        traceback.print_exc()
         current_status = {
             "status": "error", 
             "message": f"Processing error: {str(e)}", 
@@ -178,6 +201,12 @@ def get_domains():
 
 @app.route('/api/status')
 def get_status():
+    global current_status
+    has_result = 'result' in current_status
+    latex_length = len(current_status.get('result', {}).get('latex_content', '')) if has_result else 0
+    
+    print(f"[STATUS] status={current_status.get('status')}, request_id={current_status.get('request_id')}, has_result={has_result}, latex_length={latex_length}")
+    
     return jsonify(current_status)
 
 @app.route('/api/query', methods=['POST'])
@@ -220,6 +249,21 @@ def process_query():
         print(f"Error in process_query: {e}")
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
+@app.route('/api/download/<filename>')
+def download_file(filename):
+    try:
+        if not (filename.endswith('.tex') or filename.endswith('.txt')):
+            return jsonify({"error": "Invalid file type"}), 400
+        
+        filepath = os.path.join(os.getcwd(), filename)
+        
+        if not os.path.exists(filepath):
+            return jsonify({"error": "File not found"}), 404
+        
+        return send_file(filepath, as_attachment=True)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/health')
 def health_check():
     try:
@@ -246,4 +290,4 @@ if __name__ == '__main__':
         app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
     else:
         print("Failed to initialize bot. Exiting.")
-        sys.exit(1)
+        sys.exit(1)#!/usr/bin/env python3
